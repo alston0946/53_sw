@@ -3,7 +3,7 @@ name: Run Five Buddha Strategy
 on:
   workflow_dispatch:
   schedule:
-    - cron: "35 10 * * 1-5"
+    - cron: "53 9 * * 1-5"
 
 jobs:
   run-strategy:
