@@ -1,0 +1,47 @@
+name: Run Five Buddha Strategy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "35 10 * * 1-5"
+
+jobs:
+  run-strategy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run strategy and send email
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_SUBJECT_PREFIX: ${{ vars.EMAIL_SUBJECT_PREFIX }}
+          TARGET_DATES: ${{ vars.TARGET_DATES }}
+          TARGET_DATE_RANGES: ${{ vars.TARGET_DATE_RANGES }}
+          PRICE_ADJ_ANCHOR_DATE: ${{ vars.PRICE_ADJ_ANCHOR_DATE }}
+          EMAIL_ATTACH_DEBUG: ${{ vars.EMAIL_ATTACH_DEBUG }}
+        run: python run_and_email.py
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: five-buddha-outputs
+          path: outputs/
+          if-no-files-found: ignore
+          retention-days: 7

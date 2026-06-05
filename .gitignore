@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+outputs/
+tmp_pdf_extract/
+tmp_pdf_pages/
+five_buddha_*.csv
