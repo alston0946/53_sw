@@ -26,7 +26,7 @@
 可选添加这些 `Variables`：
 
 - `EMAIL_SUBJECT_PREFIX`：邮件标题前缀，例如 `五佛手申万行业`
-- `TARGET_DATES`：指定目标日期，多个日期用逗号分隔，例如 `20260605,20260606`
+- `TARGET_DATES`：指定目标日期，多个日期用逗号分隔，例如 `20260605,20260606`。如果不填，脚本会自动使用最近一个交易日
 - `TARGET_DATE_RANGES`：指定日期区间，格式如 `20260601:20260605,20260610:20260612`
 - `PRICE_ADJ_ANCHOR_DATE`：前复权锚定日，不填时默认取上海时区当天
 - `EMAIL_ATTACH_DEBUG`：填 `true` 时，邮件额外附带 debug/failed/filtered 文件

@@ -65,7 +65,7 @@ def shanghai_today_str() -> str:
 # 例：TARGET_DATES_INPUT = ["20260430", "20260506"]
 # 例：TARGET_DATES_INPUT = "20260430,20260506,20260507"
 TARGET_DATES_ENV = os.getenv("TARGET_DATES", "").strip()
-TARGET_DATES_INPUT = TARGET_DATES_ENV or [shanghai_today_str()]
+TARGET_DATES_INPUT = TARGET_DATES_ENV or []
 
 # 方式2：按自然日范围批量生成目标日。非交易日会在 debug 文件中记录 target_date_not_trading_day。
 #TARGET_DATE_RANGES = [("20260105", "20260105")]
@@ -130,15 +130,15 @@ def normalize_target_dates(target_dates_input, target_date_ranges=None):
     return dates
 
 
-TARGET_DATES = normalize_target_dates(TARGET_DATES_INPUT, TARGET_DATE_RANGES)
-TARGET_DATES_TAG = f"{TARGET_DATES[0]}-{TARGET_DATES[-1]}" if len(TARGET_DATES) > 1 else TARGET_DATES[0]
-OBSERVATION_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_pool_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
-DEBUG_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_debug_rejected_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
-FAILED_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_failed_fetch_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
-FILTERED_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_filtered_out_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
-OBSERVATION_LITE_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_pool_qfq_simple_swl1_{TARGET_DATES_TAG}_lite.csv")
+TARGET_DATES = []
+TARGET_DATES_TAG = ""
+OBSERVATION_FILE = ""
+DEBUG_FILE = ""
+FAILED_FILE = ""
+FILTERED_FILE = ""
+OBSERVATION_LITE_FILE = ""
 # SCAN_END_DATE 只代表需要扫描/输出的最后一个 target day。
-SCAN_END_DATE = max(TARGET_DATES)
+SCAN_END_DATE = ""
 START_DATE = "20240101"
 
 # 前复权锚定日期：
@@ -148,13 +148,12 @@ START_DATE = "20240101"
 # 因此，前复权需要把 adj_factor 至少取到除权除息之后，通常取到今天或你指定的锚定日。
 # - None：默认使用当前日期作为前复权锚定日。
 # - 也可以手动写死，例如 "20260520"，保证历史复盘结果可复现。
-PRICE_ADJ_ANCHOR_DATE = os.getenv("PRICE_ADJ_ANCHOR_DATE", "").strip() or shanghai_today_str()
-PRICE_ADJ_ANCHOR_DATE = str(PRICE_ADJ_ANCHOR_DATE).replace("-", "").replace("/", "")
+PRICE_ADJ_ANCHOR_DATE = os.getenv("PRICE_ADJ_ANCHOR_DATE", "").strip()
 
 # 实际取数截止日：必须覆盖 target day，同时也要覆盖前复权锚定日。
 # 后续信号仍只在 TARGET_DATES 上判断，不会把锚定日之后的K线当作目标日扫描。
-FETCH_END_DATE = max(SCAN_END_DATE, PRICE_ADJ_ANCHOR_DATE)
-END_DATE = SCAN_END_DATE  # 保留兼容旧变量名，表示扫描结束日，不再用于取数截止
+FETCH_END_DATE = ""
+END_DATE = ""  # 保留兼容旧变量名，表示扫描结束日，不再用于取数截止
 
 
 # =========================
@@ -566,6 +565,28 @@ def get_latest_trade_date(pro) -> str:
     if not open_days:
         raise RuntimeError("no open trade day found in recent trade calendar")
     return max(open_days)
+
+
+def initialize_runtime_dates(pro) -> None:
+    global TARGET_DATES, TARGET_DATES_TAG
+    global OBSERVATION_FILE, DEBUG_FILE, FAILED_FILE, FILTERED_FILE, OBSERVATION_LITE_FILE
+    global SCAN_END_DATE, END_DATE, PRICE_ADJ_ANCHOR_DATE, FETCH_END_DATE
+
+    target_dates_input = TARGET_DATES_INPUT
+    if not target_dates_input and not TARGET_DATE_RANGES:
+        target_dates_input = [get_latest_trade_date(pro)]
+
+    TARGET_DATES = normalize_target_dates(target_dates_input, TARGET_DATE_RANGES)
+    TARGET_DATES_TAG = f"{TARGET_DATES[0]}-{TARGET_DATES[-1]}" if len(TARGET_DATES) > 1 else TARGET_DATES[0]
+    OBSERVATION_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_pool_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
+    DEBUG_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_debug_rejected_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
+    FAILED_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_failed_fetch_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
+    FILTERED_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_filtered_out_qfq_simple_swl1_{TARGET_DATES_TAG}.csv")
+    OBSERVATION_LITE_FILE = os.path.join(OUTPUT_DIR, f"five_buddha_pool_qfq_simple_swl1_{TARGET_DATES_TAG}_lite.csv")
+    SCAN_END_DATE = max(TARGET_DATES)
+    END_DATE = SCAN_END_DATE
+    PRICE_ADJ_ANCHOR_DATE = (PRICE_ADJ_ANCHOR_DATE or shanghai_today_str()).replace("-", "").replace("/", "")
+    FETCH_END_DATE = max(SCAN_END_DATE, PRICE_ADJ_ANCHOR_DATE)
 
 
 def load_universe_from_tushare(pro):
@@ -1832,6 +1853,7 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     ts.set_token(TUSHARE_TOKEN)
     pro = ts.pro_api()
+    initialize_runtime_dates(pro)
 
     universe, filtered_out = load_universe(pro)
     filtered_out.to_csv(FILTERED_FILE, index=False, encoding="utf-8-sig")
