@@ -176,8 +176,11 @@ PRICE_ADJ_MODE = "qfq"  # 稳定版：不使用 ts.pro_bar，而是 pro.daily + 
 # =========================
 FB_LOOKBACK = 15
 FB_RECENT_CONVERGE_MAX = 0.12       # 最近15日内五线最大间隔至少曾经 <= 12%
+FB_RECENT_CONVERGE_MAX_IF_MIN_IS_MA60 = 0.16  # 如果最小均线是MA60，则最近15日最小离散度放宽到 <= 16%
 FB_CURRENT_SPREAD_MAX = 0.20        # target day五线最大间隔不能超过20%
+FB_CURRENT_SPREAD_MAX_IF_MIN_IS_MA60 = 0.25  # 如果target day最低均线是MA60，则当天五线最大间隔放宽到 <= 25%
 FB_MAX_CLOSE_OVER_MA20 = 0.20       # 收盘价离MA20太远则不进入形态主池
+FB_MAX_CLOSE_OVER_MA20_IF_MIN_IS_MA60 = 0.30  # 如果target day最低均线是MA60，则close相对MA20最大偏离放宽到 <= 30%
 FB_REQUIRE_CLOSE_ABOVE_ALL_MA = True
 
 FB_MA30_3D_FLOOR = -0.010
@@ -398,17 +401,31 @@ def five_line_spread(row: pd.Series) -> float:
     return (max(mas) - min(mas)) / float(row["close"])
 
 
+def min_ma_name_on_row(row: pd.Series) -> str:
+    ma_vals = {
+        "MA5": row.get("ma5", np.nan),
+        "MA10": row.get("ma10", np.nan),
+        "MA20": row.get("ma20", np.nan),
+        "MA30": row.get("ma30", np.nan),
+        "MA60": row.get("ma60", np.nan),
+    }
+    valid = [(name, float(val)) for name, val in ma_vals.items() if pd.notna(val)]
+    if not valid:
+        return ""
+    return min(valid, key=lambda x: x[1])[0]
+
+
 def recent_min_spread(df: pd.DataFrame, idx: int, lookback: int):
     start = max(0, idx - lookback + 1)
     vals = []
     for j in range(start, idx + 1):
         spread = df.iloc[j].get("five_line_spread", np.nan)
         if pd.notna(spread):
-            vals.append((j, float(spread)))
+            vals.append((j, float(spread), min_ma_name_on_row(df.iloc[j])))
     if not vals:
-        return np.nan, ""
-    min_idx, min_val = min(vals, key=lambda x: x[1])
-    return min_val, df.iloc[min_idx]["date"].strftime("%Y-%m-%d")
+        return np.nan, "", ""
+    min_idx, min_val, min_ma_name = min(vals, key=lambda x: x[1])
+    return min_val, df.iloc[min_idx]["date"].strftime("%Y-%m-%d"), min_ma_name
 
 
 def ma_distance_grade_from_spread(spread: float) -> tuple:
@@ -1040,22 +1057,46 @@ def five_buddha_scored_detail(df: pd.DataFrame, idx: int) -> dict:
         out["fb_hard_fail_reason"] = ma_detail.get("ma_structure_reason", "MA_STRUCTURE_FAIL")
         return out
 
-    recent_min, recent_min_date = recent_min_spread(df, idx, FB_LOOKBACK)
+    recent_min, recent_min_date, recent_min_lowest_ma_name = recent_min_spread(df, idx, FB_LOOKBACK)
     current_spread = row["five_line_spread"]
+    current_lowest_ma_name = min_ma_name_on_row(row)
+    recent_converge_limit = (
+        FB_RECENT_CONVERGE_MAX_IF_MIN_IS_MA60
+        if recent_min_lowest_ma_name == "MA60"
+        else FB_RECENT_CONVERGE_MAX
+    )
+    current_spread_limit = (
+        FB_CURRENT_SPREAD_MAX_IF_MIN_IS_MA60
+        if current_lowest_ma_name == "MA60"
+        else FB_CURRENT_SPREAD_MAX
+    )
+    close_over_ma20_limit = (
+        FB_MAX_CLOSE_OVER_MA20_IF_MIN_IS_MA60
+        if current_lowest_ma_name == "MA60"
+        else FB_MAX_CLOSE_OVER_MA20
+    )
 
-    if pd.isna(recent_min) or recent_min > FB_RECENT_CONVERGE_MAX:
+    if pd.isna(recent_min) or recent_min > recent_converge_limit:
         out["fb_hard_fail_reason"] = "NO_RECENT_CONVERGENCE"
         out["fb_recent_min_5line_spread_pct"] = round(float(recent_min) * 100, 2) if pd.notna(recent_min) else np.nan
+        out["fb_recent_min_5line_spread_date"] = recent_min_date
+        out["fb_recent_min_5line_lowest_ma"] = recent_min_lowest_ma_name
+        out["fb_recent_converge_limit_pct"] = round(float(recent_converge_limit) * 100, 2)
         return out
 
-    if pd.isna(current_spread) or current_spread > FB_CURRENT_SPREAD_MAX:
+    if pd.isna(current_spread) or current_spread > current_spread_limit:
         out["fb_hard_fail_reason"] = "CURRENT_SPREAD_TOO_WIDE"
         out["fb_current_5line_spread_pct"] = round(float(current_spread) * 100, 2) if pd.notna(current_spread) else np.nan
+        out["fb_current_5line_lowest_ma"] = current_lowest_ma_name
+        out["fb_current_spread_limit_pct"] = round(float(current_spread_limit) * 100, 2)
         return out
 
     over_ma20 = safe_ratio(row["close"], row["ma20"]) - 1
-    if pd.notna(over_ma20) and over_ma20 > FB_MAX_CLOSE_OVER_MA20:
+    if pd.notna(over_ma20) and over_ma20 > close_over_ma20_limit:
         out["fb_hard_fail_reason"] = "PRICE_TOO_FAR_FROM_MA20"
+        out["fb_current_5line_lowest_ma"] = current_lowest_ma_name
+        out["fb_close_over_ma20_pct"] = round(float(over_ma20) * 100, 2) if pd.notna(over_ma20) else np.nan
+        out["fb_close_over_ma20_limit_pct"] = round(float(close_over_ma20_limit) * 100, 2)
         return out
 
     # MA30/MA60不能快速下压
@@ -1118,10 +1159,15 @@ def five_buddha_scored_detail(df: pd.DataFrame, idx: int) -> dict:
         "fb_candidate_reason": "FB_HARD_RULES_PASSED",
         "fb_recent_min_5line_spread_pct": round(float(recent_min) * 100, 2),
         "fb_recent_min_5line_spread_date": recent_min_date,
+        "fb_recent_min_5line_lowest_ma": recent_min_lowest_ma_name,
+        "fb_recent_converge_limit_pct": round(float(recent_converge_limit) * 100, 2),
         "fb_current_5line_spread_pct": round(float(current_spread) * 100, 2),
+        "fb_current_5line_lowest_ma": current_lowest_ma_name,
+        "fb_current_spread_limit_pct": round(float(current_spread_limit) * 100, 2),
         "fb_ma30_3d_change_pct": round(float(ma30_3d) * 100, 2) if pd.notna(ma30_3d) else np.nan,
         "fb_ma60_5d_change_pct": round(float(ma60_5d) * 100, 2) if pd.notna(ma60_5d) else np.nan,
         "fb_close_over_ma20_pct": round(float(over_ma20) * 100, 2) if pd.notna(over_ma20) else np.nan,
+        "fb_close_over_ma20_limit_pct": round(float(close_over_ma20_limit) * 100, 2),
         "fb_close_over_ma10_pct": round(float(close_over_ma10) * 100, 2) if pd.notna(close_over_ma10) else np.nan,
         "fb_close_over_ma5_pct": round(float(close_over_ma5) * 100, 2) if pd.notna(close_over_ma5) else np.nan,
         "fb_close_over_ma30_pct": round(float(close_over_ma30) * 100, 2) if pd.notna(close_over_ma30) else np.nan,
