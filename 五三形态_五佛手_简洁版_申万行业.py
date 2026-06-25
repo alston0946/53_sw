@@ -1129,7 +1129,7 @@ def five_buddha_scored_detail(df: pd.DataFrame, idx: int) -> dict:
     if pd.isna(ma60_5d) or ma60_5d < FB_MA60_5D_FLOOR:
         out["fb_hard_fail_reason"] = "MA60_FAST_DOWN"
         return out
-
+        
     if FB_REQUIRE_LAST3_VOL_ABOVE_MA20:
         if idx < 2:
             out["fb_hard_fail_reason"] = "LAST3_VOL_MA20_LOOKBACK_NOT_ENOUGH"
@@ -1138,12 +1138,22 @@ def five_buddha_scored_detail(df: pd.DataFrame, idx: int) -> dict:
         if vol_win.isna().any().any():
             out["fb_hard_fail_reason"] = "LAST3_VOL_MA20_MISSING"
             return out
-        last3_vol_above_ma20 = bool((vol_win["volume"] >= vol_win["vol_ma20"]).all())
-        if not last3_vol_above_ma20:
-            out["fb_hard_fail_reason"] = "LAST3_VOLUME_NOT_ALL_ABOVE_MA20"
+    
+        last3_vol_above_ma20_count = int((vol_win["volume"] >= vol_win["vol_ma20"]).sum())
+        if last3_vol_above_ma20_count < 2:
+            out["fb_hard_fail_reason"] = "LAST3_VOLUME_LT_2_DAYS_ABOVE_MA20"
+            out["fb_last3_vol_above_ma20_count"] = last3_vol_above_ma20_count
             return out
+    
         out["fb_last3_vol_above_ma20"] = True
+        out["fb_last3_vol_above_ma20_count"] = last3_vol_above_ma20_count
 
+
+    
+
+
+
+    
     if idx < 1:
         out["fb_hard_fail_reason"] = "TURNOVER_RATE_LOOKBACK_NOT_ENOUGH"
         return out
